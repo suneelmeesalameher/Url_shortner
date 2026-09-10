@@ -1,1 +1,0 @@
-/opt/homebrew/Cellar/postgresql@14/14.11_1/bin/postgres "-D" "/Users/mehersuneelmeesala/Desktop/GMU_COURSES/GMU_HW/Url_shortner/.local/pgdata" "-p" "5432" "-k" "/Users/mehersuneelmeesala/Desktop/GMU_COURSES/GMU_HW/Url_shortner/.local/pgdata" "-h" "localhost"

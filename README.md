@@ -21,7 +21,9 @@ cd Url_shortner
 docker compose up --build
 ```
 
-That's it. The app waits for Postgres and Redis to report healthy before starting, creates its own schema on first boot, and is ready at **http://localhost:8000** (interactive API docs at `/docs`).
+That's it. The app waits for Postgres and Redis to report healthy before starting, creates its own schema on first boot, and is ready at **http://localhost:8000**.
+
+Navigating to **http://localhost:8000** in a browser opens a small interactive web dashboard for the service — shorten a URL (with an optional vanity alias), copy the resulting short link, and look up click analytics by short code, all without touching `curl`. It's a thin client over the same public API documented below (interactive API docs are at `/docs`, ReDoc at `/redoc`).
 
 Optional: `cp .env.example .env` first if you want to override defaults (ports, rate limits, Postgres credentials) — the stack runs fine without it.
 

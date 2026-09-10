@@ -25,7 +25,11 @@ from app.redis_client import get_client
 # whoever's poking at the API interactively. /healthz is exempt too - an
 # orchestrator polling it every few seconds (see the Dockerfile HEALTHCHECK and
 # docker-compose.yml) shouldn't be able to trip a limit meant for API abuse.
-_EXEMPT_PATHS = frozenset({"/docs", "/redoc", "/openapi.json", "/docs/oauth2-redirect", "/healthz"})
+# "/" (the dashboard's own HTML page - see GET / in app.main) is exempt for the
+# same reason: loading the page is not the API traffic this limit protects. Note
+# that the dashboard's own fetch() calls to /api/v1/... are deliberately NOT
+# exempt - those go through the same limit as any other client.
+_EXEMPT_PATHS = frozenset({"/", "/docs", "/redoc", "/openapi.json", "/docs/oauth2-redirect", "/healthz"})
 
 
 class IPRateLimitMiddleware(BaseHTTPMiddleware):

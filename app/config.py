@@ -44,7 +44,13 @@ class Settings(BaseSettings):
     analytics_flush_interval_seconds: float = 1.0
     analytics_flush_batch_size: int = 500
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    # extra="ignore": .env is shared with docker-compose.yml, which needs
+    # POSTGRES_USER/POSTGRES_PASSWORD/POSTGRES_DB for its own variable
+    # interpolation even though Settings has no matching fields (it gets the
+    # assembled DATABASE_URL instead - see docker-compose.yml). Without this,
+    # pydantic-settings' default "forbid" policy raises a ValidationError on
+    # startup for any key in .env that isn't a field here.
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
 
 settings = Settings()

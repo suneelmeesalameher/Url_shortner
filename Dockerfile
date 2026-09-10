@@ -36,6 +36,7 @@ ENV PATH="/opt/venv/bin:$PATH" \
     PYTHONUNBUFFERED=1
 
 COPY app ./app
+COPY static ./static
 
 USER app
 

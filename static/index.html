@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>URL Shortener</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="min-h-screen bg-slate-100 text-slate-800">
+  <div class="max-w-4xl mx-auto px-4 py-10">
+    <header class="mb-8">
+      <h1 class="text-3xl font-bold text-slate-900">URL Shortener</h1>
+      <p class="text-slate-500 mt-1">Shorten a link, mint a vanity alias, and inspect click analytics.</p>
+    </header>
+
+    <main class="grid gap-6 md:grid-cols-2">
+      <!-- Shorten URL Card -->
+      <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+        <h2 class="text-lg font-semibold text-slate-900 mb-4">Shorten a URL</h2>
+
+        <form id="shorten-form" class="space-y-4">
+          <div>
+            <label for="original-url" class="block text-sm font-medium text-slate-700 mb-1">
+              Original URL <span class="text-red-500">*</span>
+            </label>
+            <input
+              id="original-url"
+              type="url"
+              required
+              placeholder="https://example.com/a/very/long/path"
+              class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+            />
+          </div>
+
+          <div>
+            <label for="custom-alias" class="block text-sm font-medium text-slate-700 mb-1">
+              Custom alias <span class="text-slate-400 font-normal">(optional, max 20 characters)</span>
+            </label>
+            <input
+              id="custom-alias"
+              type="text"
+              maxlength="20"
+              placeholder="my-brand"
+              class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+            />
+          </div>
+
+          <button
+            id="shorten-submit"
+            type="submit"
+            class="w-full inline-flex justify-center items-center rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-60 disabled:cursor-not-allowed transition"
+          >
+            Shorten
+          </button>
+        </form>
+
+        <div id="shorten-result" class="mt-4 hidden"></div>
+      </section>
+
+      <!-- Analytics Inspector Card -->
+      <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+        <h2 class="text-lg font-semibold text-slate-900 mb-4">Analytics Inspector</h2>
+
+        <form id="analytics-form" class="space-y-4">
+          <div>
+            <label for="analytics-code" class="block text-sm font-medium text-slate-700 mb-1">
+              Short code or alias <span class="text-red-500">*</span>
+            </label>
+            <input
+              id="analytics-code"
+              type="text"
+              required
+              placeholder="my-brand"
+              class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+            />
+          </div>
+
+          <button
+            id="analytics-submit"
+            type="submit"
+            class="w-full inline-flex justify-center items-center rounded-lg bg-slate-800 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700 disabled:opacity-60 disabled:cursor-not-allowed transition"
+          >
+            Look up
+          </button>
+        </form>
+
+        <div id="analytics-result" class="mt-4 hidden"></div>
+      </section>
+    </main>
+
+    <footer class="mt-10 flex flex-wrap gap-x-6 gap-y-2 justify-center text-sm text-slate-500">
+      <a href="/docs" target="_blank" rel="noopener" class="hover:text-indigo-600 underline underline-offset-2">API Docs (Swagger)</a>
+      <a href="/redoc" target="_blank" rel="noopener" class="hover:text-indigo-600 underline underline-offset-2">API Reference (ReDoc)</a>
+      <a href="/healthz" target="_blank" rel="noopener" class="hover:text-indigo-600 underline underline-offset-2">Health Check</a>
+    </footer>
+  </div>
+
+  <script>
+    // ---- Small shared helpers ----------------------------------------------
+
+    function setLoading(button, isLoading, idleLabel) {
+      button.disabled = isLoading;
+      button.textContent = isLoading ? "Working..." : idleLabel;
+    }
+
+    function errorCallout(message) {
+      const div = document.createElement("div");
+      div.className = "rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700";
+      div.textContent = message;
+      return div;
+    }
+
+    // Parses the app's structured error body ({error, message, timestamp}) when
+    // present, falling back to a generic message for anything unexpected
+    // (network failure, a non-JSON response, etc.).
+    async function describeError(response) {
+      try {
+        const body = await response.json();
+        if (body && body.error && body.message) {
+          return `${body.error} (HTTP ${response.status}): ${body.message}`;
+        }
+      } catch (_) {
+        // response body wasn't JSON - fall through to the generic message below
+      }
+      return `Request failed with HTTP ${response.status}`;
+    }
+
+    // ---- Shorten URL card ---------------------------------------------------
+
+    const shortenForm = document.getElementById("shorten-form");
+    const shortenSubmit = document.getElementById("shorten-submit");
+    const shortenResult = document.getElementById("shorten-result");
+
+    shortenForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+
+      const originalUrl = document.getElementById("original-url").value.trim();
+      const customAlias = document.getElementById("custom-alias").value.trim();
+
+      const payload = { original_url: originalUrl };
+      if (customAlias) {
+        payload.custom_alias = customAlias;
+      }
+
+      shortenResult.classList.remove("hidden");
+      shortenResult.replaceChildren();
+      setLoading(shortenSubmit, true, "Shorten");
+
+      try {
+        const response = await fetch("/api/v1/shorten", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+
+        if (!response.ok) {
+          shortenResult.replaceChildren(errorCallout(await describeError(response)));
+          return;
+        }
+
+        const data = await response.json();
+        renderShortenSuccess(data);
+      } catch (err) {
+        shortenResult.replaceChildren(errorCallout(`Network error: ${err.message}`));
+      } finally {
+        setLoading(shortenSubmit, false, "Shorten");
+      }
+    });
+
+    function renderShortenSuccess(data) {
+      const wrapper = document.createElement("div");
+      wrapper.className = "rounded-lg border border-green-200 bg-green-50 px-4 py-3 space-y-2";
+
+      const row = document.createElement("div");
+      row.className = "flex items-center gap-2";
+
+      const link = document.createElement("a");
+      link.href = data.short_url;
+      link.target = "_blank";
+      link.rel = "noopener";
+      link.textContent = data.short_url;
+      link.className = "text-sm font-medium text-indigo-700 underline underline-offset-2 break-all";
+
+      const copyBtn = document.createElement("button");
+      copyBtn.type = "button";
+      copyBtn.textContent = "Copy";
+      copyBtn.className =
+        "shrink-0 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50";
+      copyBtn.addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(data.short_url);
+          copyBtn.textContent = "Copied!";
+          setTimeout(() => (copyBtn.textContent = "Copy"), 1500);
+        } catch (_) {
+          copyBtn.textContent = "Copy failed";
+          setTimeout(() => (copyBtn.textContent = "Copy"), 1500);
+        }
+      });
+
+      row.append(link, copyBtn);
+
+      const meta = document.createElement("p");
+      meta.className = "text-xs text-green-800/80 break-all";
+      meta.textContent = `→ ${data.original_url}`;
+
+      wrapper.append(row, meta);
+      shortenResult.replaceChildren(wrapper);
+    }
+
+    // ---- Analytics Inspector card -------------------------------------------
+
+    const analyticsForm = document.getElementById("analytics-form");
+    const analyticsSubmit = document.getElementById("analytics-submit");
+    const analyticsResult = document.getElementById("analytics-result");
+
+    analyticsForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+
+      const code = document.getElementById("analytics-code").value.trim();
+
+      analyticsResult.classList.remove("hidden");
+      analyticsResult.replaceChildren();
+      setLoading(analyticsSubmit, true, "Look up");
+
+      try {
+        const response = await fetch(`/api/v1/urls/${encodeURIComponent(code)}/analytics`);
+
+        if (!response.ok) {
+          analyticsResult.replaceChildren(errorCallout(await describeError(response)));
+          return;
+        }
+
+        const data = await response.json();
+        renderAnalyticsSuccess(data);
+      } catch (err) {
+        analyticsResult.replaceChildren(errorCallout(`Network error: ${err.message}`));
+      } finally {
+        setLoading(analyticsSubmit, false, "Look up");
+      }
+    });
+
+    function renderAnalyticsSuccess(data) {
+      const wrapper = document.createElement("div");
+      wrapper.className = "space-y-3";
+
+      const totalCard = document.createElement("div");
+      totalCard.className = "rounded-lg bg-slate-50 border border-slate-200 px-4 py-3";
+      totalCard.innerHTML = `
+        <div class="text-xs uppercase tracking-wide text-slate-500">Total clicks</div>
+        <div class="text-2xl font-bold text-slate-900">${data.total_clicks}</div>
+      `;
+
+      const jsonLabel = document.createElement("div");
+      jsonLabel.className = "text-xs uppercase tracking-wide text-slate-500";
+      jsonLabel.textContent = "Full response";
+
+      const pre = document.createElement("pre");
+      pre.className = "rounded-lg bg-slate-900 text-slate-100 text-xs p-3 overflow-x-auto max-h-64 overflow-y-auto";
+      pre.textContent = JSON.stringify(data, null, 2);
+
+      wrapper.append(totalCard, jsonLabel, pre);
+      analyticsResult.replaceChildren(wrapper);
+    }
+  </script>
+</body>
+</html>

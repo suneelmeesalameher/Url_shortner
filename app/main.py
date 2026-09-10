@@ -4,11 +4,13 @@ translated into HTTP responses.
 """
 import asyncio
 import contextlib
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.api.redirect import router as redirect_router
 from app.api.v1.urls import router as urls_router
@@ -61,6 +63,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="URL Shortener", version="1.0.0", lifespan=lifespan)
+
+# Serves the single-page dashboard (static/index.html) - a thin client over the
+# same public API, not a separate app. Mounted under /static rather than at the
+# root so the root path itself can be routed explicitly (see "/" below) instead
+# of falling through to StaticFiles' own directory-listing/index behavior.
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+
+@app.get("/", include_in_schema=False)
+async def serve_dashboard() -> FileResponse:
+    """Excluded from the OpenAPI schema (`include_in_schema=False`) - this isn't
+    part of the versioned API surface documented at /docs, it's the browser entry
+    point for the dashboard that calls that API.
+    """
+    return FileResponse(os.path.join("static", "index.html"))
 
 
 @app.get("/healthz", tags=["health"])

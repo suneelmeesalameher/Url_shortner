@@ -1,11 +1,16 @@
 # Human-in-the-Loop Audit Log
 
 > **Note on scope:** this log documents the actual sequence of prompts that built this
-> repository - nine substantive engineering requests preceded this documentation
-> request, not seven. Two of those nine were short operational commands ("start the
-> application," "retry running it") that surfaced a real environment issue and are
-> included here because they changed what got verified, not because they were design
-> discussions. An audit log that rounds its own history is not an audit log.
+> repository - eleven substantive engineering requests as of this revision, not
+> seven. Two of those were short operational commands ("start the application,"
+> "retry running it") that surfaced a real environment issue and are included here
+> because they changed what got verified, not because they were design discussions.
+> An audit log that rounds its own history is not an audit log.
+>
+> This file is itself being revised in Prompt 11, because Prompt 10's version of it
+> made a claim - "no UI or frontend scope was ever introduced" - that Prompt 11 made
+> false the moment it landed. See the Human Architectural Overrides section below for
+> how that's corrected: struck through and replaced, not quietly deleted.
 
 ## Prompt History Log
 
@@ -20,6 +25,8 @@
 | 7 | Deployment Configuration | Production-ready Docker artifacts: multi-stage Dockerfile, `docker-compose.yml` with health checks and persistent volumes, setup README. | Multi-stage `Dockerfile` (non-root runtime, stdlib-only healthcheck); `docker-compose.yml` (Postgres/Redis/app, named volumes, `depends_on: condition: service_healthy`); `GET /healthz` added; dev-convenience schema auto-creation added to `lifespan` (explicitly flagged as not a substitute for Alembic migrations). |
 | 8 | Live Deployment Verification | Operational: actually start the stack and confirm it serves traffic. | First attempt ran without a live Docker daemon, so the stack was started as local processes (Postgres/Redis/uvicorn) as a fallback and smoke-tested successfully. Once Docker became available, the manual processes were torn down and `docker compose up --build` was run for real, with the same shorten → redirect → analytics smoke test repeated successfully against the actual containers. |
 | 9 | QA Automation Script | Generate `test_stack.sh` and a companion manual checklist covering startup, the greenfield flow, alias conflicts, SSRF rejection, analytics propagation, and a live Redis-outage fallback test. | `test_stack.sh` (20 automated checks) and `QA_CHECKLIST.md`. First run found a real bug **in the test script itself**: a generated alias exceeded the app's 20-character limit, producing an unrelated 422 that masked the conflict check it was meant to exercise. Fixed and reverified: 20/20 passing, confirmed stable across two consecutive runs. |
+| 10 | Publication Documentation | Generate the three publication-ready documentation artifacts: `README.md`, `ARCHITECTURE_AND_SUMMARY.md`, this file. | This log itself (with the "7 prompts" premise corrected to the real count of 9); an executive README with curl examples for every endpoint; a technical design write-up covering the Base62/tombstoning/302-vs-301 trade-offs and a future-scalability section. |
+| 11 | Frontend Dashboard | Add a single-page web dashboard (`static/index.html`, Tailwind via CDN) for shortening URLs and inspecting analytics interactively, mounted and served by the existing FastAPI app at `GET /`. | `static/index.html` (shorten card with copy-to-clipboard, analytics inspector card, footer links to `/docs`/`/redoc`/`/healthz`); `StaticFiles` mount + `GET /` route in `app/main.py`; `Dockerfile` updated to copy `static/` into the image; `/` added to the rate-limiter's exempt paths (the page load itself doesn't count against the API budget, but the dashboard's own `fetch()` calls to `/api/v1/...` do). Two real, pre-existing bugs found and fixed while verifying this change end-to-end (see Verification Results): a `Settings` crash on any `.env` containing Compose-only variables, and a stale Postgres volume left over from earlier manual testing with mismatched credentials. |
 
 ## Human Architectural Overrides
 
@@ -30,7 +37,7 @@ These are the points where a specific human decision changed the technical direc
 - **Token bucket over sliding-window log**, made explicit during Prompt 4 with a documented reason: O(1) memory and CPU cost per rate-limit key regardless of request volume, versus a sliding-window log whose cost scales with the exact traffic it's meant to bound.
 - **Fail-open, not fail-closed, for rate limiting during a Redis outage.** A rate limiter that blocks all traffic when its own backing store is unavailable would make the mitigation worse than the incident it's guarding against - this was enforced as an explicit policy in Prompt 4 and preserved through the Prompt 5 refactor.
 - **A full SOLID/DIP refactor was commissioned after the feature set was functionally complete**, not folded into feature work - Prompt 5 was a dedicated quality pass specifically because rate-limiting and caching logic had organically leaked into the service layer during Prompts 3-4, and the decision was to correct that structurally (Protocols + a composition root) rather than patch around it.
-- **No UI or frontend scope was ever introduced.** Every prompt across this engagement targeted the API/service layer exclusively - no React, HTML template, or admin console was requested or built at any point, keeping the deliverable a pure backend service by design, not by omission.
+- ~~**No UI or frontend scope was ever introduced.**~~ **Superseded in Prompt 11.** True through Prompt 9 - nine prompts targeted the API/service layer exclusively, and that restraint was itself a deliberate choice worth recording (it meant nine prompts of effort went into service-layer correctness and resilience rather than being split with UI work). Prompt 11 explicitly requested a single-page dashboard; that request is in scope and was built as `static/index.html`, kept intentionally thin - it calls the same public API a `curl` script would, adds no new backend business logic, and required no new Python dependency. The prior claim is left visible here, struck through, rather than deleted, because an audit log that erases its own superseded statements stops being an audit log.
 - **Real infrastructure was required for integration tests, not mocks**, in Prompt 6 - a decision that directly surfaced two genuine connection-pooling bugs (`NullPool`/`redis_disable_shared_pool`) that a mocked persistence layer would never have caught.
 
 ## Verification Results
@@ -44,4 +51,9 @@ All four edge-case categories named in this request were tested and passed, via 
 | **410 Gone** (expired/deactivated link) | `tests/unit/test_expiration.py`, `tests/integration/test_expired_url.py` | Confirmed for both TTL expiry and soft-deactivation (`is_active=False`); tombstone caching verified to prevent a second database query on repeat access to the same expired code. |
 | **429 Too Many Requests** | `tests/integration/test_rate_limit.py` (both IP-scoped and short-code-scoped limits) | Confirmed **only** in the pytest integration suite - `test_stack.sh` does not include a 429 check (its six sections were scoped to startup, the core flow, alias conflicts, SSRF, analytics, and the Redis-fallback test; rate-limit exhaustion was out of scope for that script). This is a real gap, not an oversight to gloss over: closing it would mean adding a seventh `test_stack.sh` section that either waits out a real rate-limit window against the live container or exposes a runtime override for the limit - worth doing before treating black-box coverage as complete. |
 
-**Overall status at last run:** 66/66 pytest tests passing (unit + integration, against real ephemeral Postgres/Redis); 20/20 `test_stack.sh` checks passing against a live Docker Compose deployment, confirmed stable across two consecutive runs.
+**Overall status at last run (Prompt 11):** 66/66 pytest tests passing and 20/20 `test_stack.sh` checks passing, both reconfirmed after the dashboard was added - the frontend change touched `app/main.py` and `app/middleware/rate_limit.py`, so both suites were rerun rather than assumed unaffected.
+
+Two real, pre-existing bugs were found and fixed during that reverification, neither caused by the dashboard code itself:
+
+- **`Settings` crashed on any `.env` containing Compose-only variables.** `docker-compose.yml` needs `POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_DB` in `.env` for its own variable interpolation, but pydantic-settings' default policy raises a `ValidationError` for any `.env` key that isn't a declared field. A stray `.env` file left over from Prompt 8's manual testing (never deleted) turned this from a latent risk into an active crash the moment `app.config` was imported locally. Fixed with `extra="ignore"` in `Settings.model_config`, since `.env` is legitimately shared between two consumers with different schemas.
+- **A stale Postgres data volume had credentials baked in from an earlier `.env` state.** `POSTGRES_PASSWORD` only takes effect the first time a Postgres data volume is initialized; once the stray `.env` above was deleted (as part of the fix above), the app recomputed `DATABASE_URL` with the compose file's fallback default password, which no longer matched what was actually stored in the already-initialized `postgres_data` volume from an earlier run. Resolved by resetting the volume (`docker compose down -v`) - safe here because all data in it was this session's own verification-run test data, not anything a real deployment would have accumulated.
