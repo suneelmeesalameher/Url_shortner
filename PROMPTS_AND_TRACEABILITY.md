@@ -1,0 +1,47 @@
+# Human-in-the-Loop Audit Log
+
+> **Note on scope:** this log documents the actual sequence of prompts that built this
+> repository - nine substantive engineering requests preceded this documentation
+> request, not seven. Two of those nine were short operational commands ("start the
+> application," "retry running it") that surfaced a real environment issue and are
+> included here because they changed what got verified, not because they were design
+> discussions. An audit log that rounds its own history is not an audit log.
+
+## Prompt History Log
+
+| # | Phase | Intent | Outcome |
+|---|---|---|---|
+| 1 | System Architecture Design | Design the service (Java/Spring Boot framing, later revised) - REST API, DB schema, short-code generation strategy, redirect strategy - without writing code. | Architecture document: endpoint/schema design, `urls`/`analytics_events` DDL with indexes, a compared recommendation of Snowflake ID + Base62 + bit-mixing for short-code generation, and a 302-over-301 redirect recommendation for analytics accuracy. |
+| 2 | Core Implementation | Rebuild the design in Python/FastAPI instead of Java; implement the shorten and redirect endpoints across controller/service/repository layers, with SSRF-aware validation. | Modular FastAPI app (`app/api`, `app/services`, `app/repositories`, `app/core`); short-code generation implemented as a single Postgres `Sequence` fetch + Base62 encode (a deliberate simplification from Prompt 1's Snowflake recommendation - see Overrides below); `validate_and_sanitize_url` SSRF guard. |
+| 3 | Analytics Feature | Resolve the ambiguous requirement "add analytics to track link usage efficiently"; implement a non-blocking recorder and a reporting endpoint. | Three explicit engineering assumptions documented (limited field capture, in-process async queue, eventual consistency); `analytics_queue.py` + `analytics_recorder.py` background worker; `AnalyticsEvent` model; `GET /api/v1/urls/{short_code}/analytics`. |
+| 4 | Reliability Hardening | Brownfield enhancement: IP- and short-code-scoped rate limiting, and transparent Redis-to-Postgres fallback, without breaking existing endpoint contracts. | Token-bucket limiter (`app/core/rate_limiter.py`) chosen over sliding-window-log with a documented trade-off; `CircuitBreaker` (`app/core/circuit_breaker.py`) shared between the cache path and the limiter; fail-open policy on both. |
+| 5 | SOLID / Resilience Audit | Full architectural audit: enforce SRP/OCP/DIP, isolate cross-cutting concerns, add structured logging and exception isolation for DB failures. | `UrlRepositoryPort`/`CachePort` Protocols; `UrlService` converted to a DI-based class; rate-limiting and caching mechanics extracted out of the service into dependencies/adapters; `StorageUnavailableError` for DB-outage isolation (503); JSON structured logging with a per-request trace id; a DIP/OCP proof test using fake adapters. |
+| 6 | Automated Test Suite | Comprehensive QA suite: unit tests (Base62, validation, expiration), integration tests (core flow, races, expiry, rate limits, SSRF) against real infrastructure. | `tests/unit/` and `tests/integration/` (66 tests total); ephemeral real Postgres + Redis fixtures rather than mocks; two genuine cross-event-loop connection bugs found and fixed (`database_use_null_pool`, `redis_disable_shared_pool`) as a direct result of testing against real infrastructure instead of doubles. |
+| 7 | Deployment Configuration | Production-ready Docker artifacts: multi-stage Dockerfile, `docker-compose.yml` with health checks and persistent volumes, setup README. | Multi-stage `Dockerfile` (non-root runtime, stdlib-only healthcheck); `docker-compose.yml` (Postgres/Redis/app, named volumes, `depends_on: condition: service_healthy`); `GET /healthz` added; dev-convenience schema auto-creation added to `lifespan` (explicitly flagged as not a substitute for Alembic migrations). |
+| 8 | Live Deployment Verification | Operational: actually start the stack and confirm it serves traffic. | First attempt ran without a live Docker daemon, so the stack was started as local processes (Postgres/Redis/uvicorn) as a fallback and smoke-tested successfully. Once Docker became available, the manual processes were torn down and `docker compose up --build` was run for real, with the same shorten → redirect → analytics smoke test repeated successfully against the actual containers. |
+| 9 | QA Automation Script | Generate `test_stack.sh` and a companion manual checklist covering startup, the greenfield flow, alias conflicts, SSRF rejection, analytics propagation, and a live Redis-outage fallback test. | `test_stack.sh` (20 automated checks) and `QA_CHECKLIST.md`. First run found a real bug **in the test script itself**: a generated alias exceeded the app's 20-character limit, producing an unrelated 422 that masked the conflict check it was meant to exercise. Fixed and reverified: 20/20 passing, confirmed stable across two consecutive runs. |
+
+## Human Architectural Overrides
+
+These are the points where a specific human decision changed the technical direction, rather than the default or most obvious path being taken:
+
+- **Base62-over-sequence chosen over Snowflake IDs at implementation time.** Prompt 1's own comparison recommended a Snowflake-style ID for zero-collision, no-DB-round-trip generation. At implementation time (Prompt 2), the simpler single-sequence approach was built instead - the right call at the traffic level this service targets, and explicitly named as the first thing to revisit (see "Sharded database sequences" in `ARCHITECTURE_AND_SUMMARY.md`) if that changes.
+- **Non-blocking async analytics was a hard requirement, not an optimization.** Prompt 3 explicitly required that recording a click never delay the redirect response - this shaped the entire queue/worker split rather than a simpler synchronous `INSERT` on the hot path.
+- **Token bucket over sliding-window log**, made explicit during Prompt 4 with a documented reason: O(1) memory and CPU cost per rate-limit key regardless of request volume, versus a sliding-window log whose cost scales with the exact traffic it's meant to bound.
+- **Fail-open, not fail-closed, for rate limiting during a Redis outage.** A rate limiter that blocks all traffic when its own backing store is unavailable would make the mitigation worse than the incident it's guarding against - this was enforced as an explicit policy in Prompt 4 and preserved through the Prompt 5 refactor.
+- **A full SOLID/DIP refactor was commissioned after the feature set was functionally complete**, not folded into feature work - Prompt 5 was a dedicated quality pass specifically because rate-limiting and caching logic had organically leaked into the service layer during Prompts 3-4, and the decision was to correct that structurally (Protocols + a composition root) rather than patch around it.
+- **No UI or frontend scope was ever introduced.** Every prompt across this engagement targeted the API/service layer exclusively - no React, HTML template, or admin console was requested or built at any point, keeping the deliverable a pure backend service by design, not by omission.
+- **Real infrastructure was required for integration tests, not mocks**, in Prompt 6 - a decision that directly surfaced two genuine connection-pooling bugs (`NullPool`/`redis_disable_shared_pool`) that a mocked persistence layer would never have caught.
+
+## Verification Results
+
+All four edge-case categories named in this request were tested and passed, via the specific mechanism noted for each (they are not all covered by the same tool):
+
+| Edge case | Verified by | Result |
+|---|---|---|
+| **409 Conflict** (duplicate custom alias) | `tests/integration/test_custom_alias_race.py` (15 genuinely concurrent requests via `asyncio.gather` against the real Postgres unique constraint) **and** `test_stack.sh` §3 | Exactly one `201`, all others `409 ALIAS_TAKEN`, in both the automated suite and the live-stack script. |
+| **SSRF blocks** (400) | `tests/unit/test_validation.py`, `tests/integration/test_invalid_and_ssrf.py` **and** `test_stack.sh` §4 | `169.254.169.254`, `127.0.0.1`, `localhost`, and RFC1918 targets all rejected with `400 INVALID_URL` in every layer that checks them. |
+| **410 Gone** (expired/deactivated link) | `tests/unit/test_expiration.py`, `tests/integration/test_expired_url.py` | Confirmed for both TTL expiry and soft-deactivation (`is_active=False`); tombstone caching verified to prevent a second database query on repeat access to the same expired code. |
+| **429 Too Many Requests** | `tests/integration/test_rate_limit.py` (both IP-scoped and short-code-scoped limits) | Confirmed **only** in the pytest integration suite - `test_stack.sh` does not include a 429 check (its six sections were scoped to startup, the core flow, alias conflicts, SSRF, analytics, and the Redis-fallback test; rate-limit exhaustion was out of scope for that script). This is a real gap, not an oversight to gloss over: closing it would mean adding a seventh `test_stack.sh` section that either waits out a real rate-limit window against the live container or exposes a runtime override for the limit - worth doing before treating black-box coverage as complete. |
+
+**Overall status at last run:** 66/66 pytest tests passing (unit + integration, against real ephemeral Postgres/Redis); 20/20 `test_stack.sh` checks passing against a live Docker Compose deployment, confirmed stable across two consecutive runs.

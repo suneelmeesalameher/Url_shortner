@@ -1,0 +1,60 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-url_shortener}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-url_shortener}
+      POSTGRES_DB: ${POSTGRES_DB:-url_shortener}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-url_shortener} -d ${POSTGRES_DB:-url_shortener}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    # AOF persistence so the volume mount below actually survives a container
+    # restart. Not load-bearing for correctness - the app is designed to run with
+    # Redis empty or fully down (cache-aside + circuit breaker, see
+    # app/cache/redis_cache.py and app/core/circuit_breaker.py) - this is here
+    # because the exercise calls for a persistent volume on every stateful
+    # container, and warm-cache-after-restart is a legitimate minor win anyway.
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-url_shortener}:${POSTGRES_PASSWORD:-url_shortener}@postgres:5432/${POSTGRES_DB:-url_shortener}
+      REDIS_URL: redis://redis:6379/0
+      BASE_HOST: ${BASE_HOST:-http://localhost:8000}
+      RATE_LIMIT_PER_IP_PER_MINUTE: ${RATE_LIMIT_PER_IP_PER_MINUTE:-100}
+      RATE_LIMIT_PER_SHORTCODE_PER_MINUTE: ${RATE_LIMIT_PER_SHORTCODE_PER_MINUTE:-1000}
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:

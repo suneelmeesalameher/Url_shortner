@@ -1,0 +1,19 @@
+2026-09-10 11:23:52.822 CDT [43534] LOG:  starting PostgreSQL 14.11 (Homebrew) on aarch64-apple-darwin23.2.0, compiled by Apple clang version 15.0.0 (clang-1500.1.0.2.5), 64-bit
+2026-09-10 11:23:52.824 CDT [43534] LOG:  listening on IPv6 address "::1", port 5432
+2026-09-10 11:23:52.824 CDT [43534] LOG:  listening on IPv4 address "127.0.0.1", port 5432
+2026-09-10 11:23:52.824 CDT [43534] FATAL:  could not create lock file ".local/pgdata/.s.PGSQL.5432.lock": No such file or directory
+2026-09-10 11:23:52.824 CDT [43534] LOG:  database system is shut down
+2026-09-10 11:24:06.198 CDT [43562] LOG:  starting PostgreSQL 14.11 (Homebrew) on aarch64-apple-darwin23.2.0, compiled by Apple clang version 15.0.0 (clang-1500.1.0.2.5), 64-bit
+2026-09-10 11:24:06.200 CDT [43562] LOG:  listening on IPv6 address "::1", port 5432
+2026-09-10 11:24:06.200 CDT [43562] LOG:  listening on IPv4 address "127.0.0.1", port 5432
+2026-09-10 11:24:06.200 CDT [43562] LOG:  listening on Unix socket "/Users/mehersuneelmeesala/Desktop/GMU_COURSES/GMU_HW/Url_shortner/.local/pgdata/.s.PGSQL.5432"
+2026-09-10 11:24:06.203 CDT [43563] LOG:  database system was shut down at 2026-09-10 11:23:52 CDT
+2026-09-10 11:24:06.208 CDT [43562] LOG:  database system is ready to accept connections
+2026-09-10 11:26:16.868 CDT [43985] FATAL:  role "mehersuneelmeesala" does not exist
+2026-09-10 11:26:28.122 CDT [43562] LOG:  received fast shutdown request
+2026-09-10 11:26:28.123 CDT [43562] LOG:  aborting any active transactions
+2026-09-10 11:26:28.125 CDT [43703] FATAL:  terminating connection due to administrator command
+2026-09-10 11:26:28.125 CDT [43644] FATAL:  terminating connection due to administrator command
+2026-09-10 11:26:28.125 CDT [43562] LOG:  background worker "logical replication launcher" (PID 43569) exited with exit code 1
+2026-09-10 11:26:28.127 CDT [43564] LOG:  shutting down
+2026-09-10 11:26:28.159 CDT [43562] LOG:  database system is shut down
